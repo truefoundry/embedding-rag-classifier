@@ -1,4 +1,3 @@
-import logging
 from typing import List
 
 import aiohttp
@@ -12,7 +11,7 @@ from tenacity import (
 from fastembed.sparse.bm25 import Bm25
 from openai import AsyncOpenAI
 
-logger = logging.getLogger(__name__)
+from src.logger import logger
 
 
 class InfinityEmbeddings:

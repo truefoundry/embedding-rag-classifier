@@ -134,18 +134,18 @@ def generate_projections(df: pd.DataFrame, results_dir: str, save_binary):
 
 
 async def main(
+    dataset_path: str,
     batch_size: int,
-    use_tf: bool,
     num_samples: int,
     models: List[str],
     results_dir: str,
     save_binary: bool,
 ):
     # Load dataset
-    dataset = pd.read_csv(os.path.abspath("./data/complete_dataset.csv"))
+    dataset = pd.read_csv(os.path.abspath(dataset_path))
 
     # Initialize client
-    infinity_client = create_infinity_client(use_tf)
+    infinity_client = create_infinity_client()
 
     # Sample and process dataset
     sampled_dataset = sample_dataset(dataset, num_samples)
@@ -160,6 +160,12 @@ async def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Generate embeddings from text dataset"
+    )
+    parser.add_argument(
+        "--dataset-path",
+        type=str,
+        default="./data/complete_dataset.csv",
+        help="Path to the dataset",
     )
     parser.add_argument(
         "--batch-size", type=int, default=4, help="Batch size for processing texts"
@@ -193,8 +199,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     asyncio.run(
         main(
+            dataset_path=args.dataset_path,
             batch_size=args.batch_size,
-            use_tf=args.use_tf,
             num_samples=args.num_samples,
             models=args.models,
             results_dir=args.results_dir,
