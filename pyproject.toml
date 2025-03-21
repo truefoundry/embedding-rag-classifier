@@ -1,0 +1,24 @@
+[project]
+name = "embedding-rag-classifier"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastembed>=0.6.0",
+    "huggingface-hub[hf-transfer]>=0.29.3",
+    "pandas>=2.2.3",
+    "pre-commit>=4.2.0",
+    "pydantic-settings>=2.8.1",
+    "pydantic>=2.10.6",
+    "python-dotenv>=1.0.1",
+    "qdrant-client>=1.13.3",
+    "seaborn>=0.13.2",
+    "setfit>=1.1.1",
+    "stamina>=25.1.0",
+    "truefoundry>=0.6.2",
+    "umap>=0.1.1",
+    "wheel>=0.45.1",
+    "streamlit>=1.43.2",
+    "plotly>=6.0.1",
+]
