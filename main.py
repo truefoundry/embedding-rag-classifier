@@ -12,6 +12,7 @@ import asyncio
 # Import the main functions
 from src.contrastive_learning import main as train_main
 from src.plot_embedding_map import main as plot_main
+from src.services.embedding_inference import EmbeddingSearchService
 
 # StreamlitHandler class for logging
 class StreamlitHandler(logging.Handler):
@@ -64,6 +65,16 @@ if "viz_figures" not in st.session_state:
 if "last_viz_params" not in st.session_state:
     st.session_state.last_viz_params = None
 
+# Inference tab state
+if "inference_model" not in st.session_state:
+    st.session_state.inference_model = (
+        "truefoundry/setfit-mxbai-embed-xsmall-v1-ivr-classifier"
+    )
+if "inference_service" not in st.session_state:
+    st.session_state.inference_service = None
+if "model_loaded" not in st.session_state:
+    st.session_state.model_loaded = False
+
 # Page configuration
 st.set_page_config(
     page_title="Truefoundry Classifier - Train & Visualize & Evaluate",
@@ -107,7 +118,7 @@ def on_tab_change():
 # Use radio buttons for tab selection
 active_tab = st.radio(
     "",
-    ["Train Model", "Visualize Embeddings"],
+    ["Train Model", "Visualize Embeddings", "Embedding Inference"],
     horizontal=True,
     format_func=lambda x: x.upper(),
 )
@@ -286,6 +297,31 @@ def render_visualization_sidebar():
         return input_csv, batch_size, num_samples, viz_button
 
 
+def render_inference_sidebar():
+    with st.sidebar:
+        st.header("Inference Configuration")
+
+        # Model selection
+        model_name = st.text_input(
+            "Model name (Hugging Face repo)",
+            value=st.session_state.inference_model,
+            key="inference_model_name",
+        )
+
+        # Load model button
+        load_button = st.button(
+            "Load Model",
+            disabled=st.session_state.model_loaded
+            and model_name == st.session_state.inference_model,
+            help="Load the selected model for inference",
+        )
+
+        if st.session_state.model_loaded:
+            st.success(f"Model loaded: {st.session_state.inference_model}")
+
+        return model_name, load_button
+
+
 # Clear the sidebar before rendering the active tab's sidebar
 st.sidebar.empty()
 
@@ -413,7 +449,7 @@ if active_tab == "Train Model":
         except Exception as e:
             st.session_state.training_in_progress = False
             st.error(f"Error during training: {str(e)}")
-else:  # Visualize Embeddings tab
+elif active_tab == "Visualize Embeddings":
     # Visualization Tab Content
     st.write("Visualize embeddings from different models using UMAP projection")
 
@@ -482,3 +518,58 @@ else:  # Visualize Embeddings tab
         for model_name, fig in st.session_state.viz_figures.items():
             st.subheader(f"Visualization for {model_name}")
             st.plotly_chart(fig, use_container_width=True)
+else:  # Inference tab
+    # Inference Tab Content
+    st.write("Perform inference using trained embedding model")
+
+    # Get inference parameters from sidebar
+    model_name, load_button = render_inference_sidebar()
+
+    # Load the model when button is clicked
+    if load_button:
+        with st.spinner("Loading model..."):
+            try:
+                # Create async event loop to load the model
+                async def load_model():
+                    st.session_state.inference_service = (
+                        await EmbeddingSearchService.get_instance(model_name)
+                    )
+                    st.session_state.inference_model = model_name
+                    st.session_state.model_loaded = True
+
+                # Run the async function
+                asyncio.run(load_model())
+                st.success(f"Model loaded successfully: {model_name}")
+            except Exception as e:
+                st.error(f"Error loading model: {str(e)}")
+
+    # Input area for inference
+    st.subheader("Enter text for classification")
+    query = st.text_area("Text input", height=150, key="inference_input")
+    predict_button = st.button("Predict", disabled=not st.session_state.model_loaded)
+
+    # Result area
+    result_container = st.container()
+
+    # Perform inference when predict button is clicked
+    if predict_button and query:
+        with st.spinner("Predicting..."):
+            try:
+                # Create async function for prediction
+                async def get_prediction():
+                    if not st.session_state.inference_service:
+                        st.error("Model not loaded. Please load a model first.")
+                        return
+
+                    result = await st.session_state.inference_service.predict(query)
+                    return result
+
+                # Run prediction
+                result = asyncio.run(get_prediction())
+
+                # Display result
+                with result_container:
+                    st.subheader("Prediction Result")
+                    st.info(f"Predicted Class: {result}")
+            except Exception as e:
+                st.error(f"Error during prediction: {str(e)}")
