@@ -66,14 +66,10 @@ async def process_dataset(
     return dataset
 
 
-def generate_projections(df: pd.DataFrame, results_dir: str, save_binary):
-    # Create timestamped directory
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    projection_dir = os.path.join(results_dir, f"projections-{timestamp}")
-    os.makedirs(projection_dir, exist_ok=True)
-
+def generate_projections(df: pd.DataFrame, save_binary=False):
     # Get all embedding columns
     embedding_cols = [col for col in df.columns if col.startswith("embedding_")]
+    figures = {}
 
     for embedding_col in embedding_cols:
         # Convert embeddings list to numpy array
@@ -122,15 +118,9 @@ def generate_projections(df: pd.DataFrame, results_dir: str, save_binary):
             ),
         )
 
-        # Save as HTML (interactive)
-        output_file = os.path.join(projection_dir, f"{embedding_col}_projection.html")
-        fig.write_html(output_file)
+        figures[embedding_col] = fig
 
-    # Save the entire dataframe if requested
-    if save_binary:
-        # Save the processed dataframe with embeddings
-        output_file = os.path.join(projection_dir, "embeddings.pkl")
-        df.to_pickle(output_file)
+    return figures
 
 
 async def main(
@@ -138,8 +128,7 @@ async def main(
     batch_size: int,
     num_samples: int,
     models: List[str],
-    results_dir: str,
-    save_binary: bool,
+    save_binary: bool = False,
 ):
     # Load dataset
     dataset = pd.read_csv(os.path.abspath(dataset_path))
@@ -153,8 +142,9 @@ async def main(
         sampled_dataset, batch_size, infinity_client, models
     )
 
-    # Save results
-    generate_projections(processed_dataset, results_dir, save_binary)
+    # Generate and return projections
+    figures = generate_projections(processed_dataset, save_binary)
+    return figures
 
 
 if __name__ == "__main__":
@@ -164,7 +154,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset-path",
         type=str,
-        default="./data/complete_dataset.csv",
+        default="./data/dataset.csv",
         help="Path to the dataset",
     )
     parser.add_argument(
@@ -173,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num-samples",
         type=int,
-        default=20,
+        default=10,
         help="Number of samples per label. Use -1 for all samples",
     )
     parser.add_argument(
@@ -203,7 +193,6 @@ if __name__ == "__main__":
             batch_size=args.batch_size,
             num_samples=args.num_samples,
             models=args.models,
-            results_dir=args.results_dir,
             save_binary=args.save_binary,
         )
     )
