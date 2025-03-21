@@ -31,9 +31,38 @@ class StreamlitHandler(logging.Handler):
             st.error(f"Error in StreamlitHandler: {str(e)}")
 
 
-# Add at the beginning of the file, after the imports
+# Initialize session state variables
 if "training_in_progress" not in st.session_state:
     st.session_state.training_in_progress = False
+if "last_active_tab" not in st.session_state:
+    st.session_state.last_active_tab = None
+
+# Training tab state
+if "train_df" not in st.session_state:
+    st.session_state.train_df = None
+if "train_csv_path" not in st.session_state:
+    st.session_state.train_csv_path = "./data/dataset.csv"
+if "loss_values" not in st.session_state:
+    st.session_state.loss_values = []
+if "training_metrics" not in st.session_state:
+    st.session_state.training_metrics = None
+if "training_completed" not in st.session_state:
+    st.session_state.training_completed = False
+
+# Visualization tab state
+if "viz_df" not in st.session_state:
+    st.session_state.viz_df = None
+if "viz_csv_path" not in st.session_state:
+    st.session_state.viz_csv_path = "./data/dataset.csv"
+if "models" not in st.session_state:
+    st.session_state.models = [
+        "mixedbread-ai/mxbai-embed-xsmall-v1",
+        "truefoundry/setfit-mxbai-embed-xsmall-v1-ivr-classifier",
+    ]
+if "viz_figures" not in st.session_state:
+    st.session_state.viz_figures = None
+if "last_viz_params" not in st.session_state:
+    st.session_state.last_viz_params = None
 
 # Page configuration
 st.set_page_config(
@@ -70,8 +99,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Handle tab change
+def on_tab_change():
+    st.session_state.last_active_tab = active_tab
+
+
 # Use radio buttons for tab selection
-active_tab = st.radio("", ["Train Model", "Visualize Embeddings"], horizontal=True)
+active_tab = st.radio(
+    "",
+    ["Train Model", "Visualize Embeddings"],
+    horizontal=True,
+    format_func=lambda x: x.upper(),
+)
+
+# Check if tab has changed
+if st.session_state.last_active_tab != active_tab:
+    on_tab_change()
 
 
 def render_training_sidebar():
@@ -100,33 +143,53 @@ def render_training_sidebar():
             st.warning("Please upload a CSV file or use the default dataset")
             st.stop()
 
+        # Save the CSV path to session state
+        st.session_state.train_csv_path = input_csv
+
         # Model selection
         model_name = st.text_input(
             "Model name (Hugging Face repo)",
             value="mixedbread-ai/mxbai-embed-xsmall-v1",
+            key="train_model_name",
         )
 
         # Training parameters
         train_samples = st.slider(
-            "Train samples per class", min_value=4, max_value=16, value=8, step=1
+            "Train samples per class",
+            min_value=4,
+            max_value=16,
+            value=8,
+            step=1,
+            key="train_samples",
         )
 
         test_samples = st.slider(
-            "Test samples per class", min_value=4, max_value=16, value=8, step=1
+            "Test samples per class",
+            min_value=4,
+            max_value=16,
+            value=8,
+            step=1,
+            key="test_samples",
         )
 
         batch_size = st.slider(
-            "Batch size", min_value=16, max_value=4096, value=32, step=1
+            "Batch size",
+            min_value=16,
+            max_value=4096,
+            value=32,
+            step=1,
+            key="train_batch_size",
         )
 
         epochs = st.slider(
-            "Number of epochs", min_value=1, max_value=5, value=1, step=1
+            "Number of epochs", min_value=1, max_value=5, value=1, step=1, key="epochs"
         )
 
         model_suffix = st.text_input(
             "Model suffix (required)",
             value="",
             help="Please enter a suffix to identify this training run (e.g., 'test-run-1')",
+            key="model_suffix",
         )
 
         st.markdown("---")
@@ -179,9 +242,16 @@ def render_visualization_sidebar():
             st.warning("Please upload a CSV file or use the default dataset")
             st.stop()
 
+        # Save the CSV path to session state
+        st.session_state.viz_csv_path = input_csv
+
         # Parameters
         batch_size = st.slider(
-            "Batch size for embedding generation", min_value=1, max_value=32, value=4
+            "Batch size for embedding generation",
+            min_value=1,
+            max_value=32,
+            value=4,
+            key="viz_batch_size",
         )
 
         num_samples = st.slider(
@@ -190,16 +260,8 @@ def render_visualization_sidebar():
             max_value=50,
             value=10,
             help="-1 means use all samples",
+            key="viz_num_samples",
         )
-
-        # Default models
-        default_models = [
-            "mixedbread-ai/mxbai-embed-xsmall-v1",
-            "truefoundry/setfit-mxbai-embed-xsmall-v1-ivr-classifier",
-        ]
-
-        if "models" not in st.session_state:
-            st.session_state.models = default_models.copy()
 
         st.subheader("Models to Compare")
 
@@ -216,10 +278,6 @@ def render_visualization_sidebar():
                 ):
                     st.session_state.models.pop(i)
                     st.rerun()
-
-        if st.button("Add Model"):
-            st.session_state.models.append("")
-            st.rerun()
 
         st.markdown("---")
 
@@ -250,9 +308,21 @@ if active_tab == "Train Model":
         train_button,
     ) = render_training_sidebar()
 
+    # Load dataset if not already loaded or if path changed
+    if (
+        st.session_state.train_df is None
+        or st.session_state.train_csv_path != input_csv
+    ):
+        try:
+            st.session_state.train_df = pd.read_csv(input_csv)
+            st.session_state.train_csv_path = input_csv
+        except Exception as e:
+            st.error(f"Error loading dataset: {str(e)}")
+            st.stop()
+
     # Display dataset preview and statistics
     try:
-        df = pd.read_csv(input_csv)
+        df = st.session_state.train_df
         st.subheader("Dataset Preview")
         st.dataframe(df.head())
 
@@ -266,29 +336,48 @@ if active_tab == "Train Model":
         st.bar_chart(label_counts.set_index("Label"))
 
     except Exception as e:
-        st.error(f"Error loading dataset: {str(e)}")
+        st.error(f"Error displaying dataset: {str(e)}")
         st.stop()
 
     # Training section
     st.subheader("Training")
 
+    # Create placeholder elements for training progress
+    status_text = st.empty()
+    progress_bar = st.empty()
+    metrics_container = st.empty()
+    progress_chart = st.empty()
+
+    # Display previous training results if available
+    if st.session_state.training_completed and not train_button:
+        if len(st.session_state.loss_values) > 0:
+            status_text.text("Previous training completed successfully!")
+            progress_bar.progress(100)
+
+            # Display the loss chart
+            loss_df = pd.DataFrame({"loss": st.session_state.loss_values})
+            progress_chart.line_chart(loss_df)
+
+            # Display metrics
+            if st.session_state.training_metrics:
+                metrics_container.json(st.session_state.training_metrics)
+
     if train_button:
         st.session_state.training_in_progress = True
+        st.session_state.loss_values = []  # Reset loss values for new training
 
         try:
-            status_text = st.empty()
-            progress_bar = st.progress(0)
-            metrics_container = st.empty()
-            progress_chart = st.empty()
-            loss_values = []
 
             def progress_callback(stats):
                 try:
                     if "embedding_loss" in stats:
                         loss = stats["embedding_loss"]
-                        loss_values.append(loss)
-                        df = pd.DataFrame({"loss": loss_values})
-                        progress_chart.line_chart(df)
+                        st.session_state.loss_values.append(loss)
+                        loss_df = pd.DataFrame({"loss": st.session_state.loss_values})
+                        progress_chart.line_chart(loss_df)
+
+                        # Store the latest metrics
+                        st.session_state.training_metrics = stats
                         metrics_container.json(stats)
                 except Exception as e:
                     logger.warning(f"Error in progress callback: {str(e)}")
@@ -319,6 +408,7 @@ if active_tab == "Train Model":
             status_text.text("Training completed!")
             st.success("Model training completed successfully!")
             st.session_state.training_in_progress = False
+            st.session_state.training_completed = True
 
         except Exception as e:
             st.session_state.training_in_progress = False
@@ -330,22 +420,65 @@ else:  # Visualize Embeddings tab
     # Get visualization parameters from sidebar
     input_csv, batch_size, num_samples, viz_button = render_visualization_sidebar()
 
+    # Load dataset if not already loaded or if path changed
+    if st.session_state.viz_df is None or st.session_state.viz_csv_path != input_csv:
+        try:
+            st.session_state.viz_df = pd.read_csv(input_csv)
+            st.session_state.viz_csv_path = input_csv
+        except Exception as e:
+            st.error(f"Error loading dataset: {str(e)}")
+            st.stop()
+
+    # Display dataset preview
+    try:
+        df = st.session_state.viz_df
+        st.subheader("Dataset Preview")
+        st.dataframe(df.head())
+
+        st.subheader("Dataset Statistics")
+        st.write(f"Total examples: {len(df)}")
+        unique_labels = df["label"].unique()
+        st.write(f"Number of unique labels: {len(unique_labels)}")
+    except Exception as e:
+        st.error(f"Error displaying dataset: {str(e)}")
+        st.stop()
+
     # Generate visualizations when button is clicked
     if viz_button:
-        with st.spinner("Generating embeddings and visualizations..."):
-            try:
-                figures = asyncio.run(
-                    plot_main(
-                        dataset_path=input_csv,
-                        batch_size=batch_size,
-                        num_samples=num_samples,
-                        models=st.session_state.models,
+        # Save the visualization parameters for state tracking
+        current_viz_params = {
+            "input_csv": input_csv,
+            "batch_size": batch_size,
+            "num_samples": num_samples,
+            "models": st.session_state.models.copy(),
+        }
+
+        # Only regenerate visualizations if parameters have changed
+        regenerate = (
+            st.session_state.viz_figures is None
+            or st.session_state.last_viz_params != current_viz_params
+        )
+
+        if regenerate:
+            with st.spinner("Generating embeddings and visualizations..."):
+                try:
+                    st.session_state.viz_figures = asyncio.run(
+                        plot_main(
+                            dataset_path=input_csv,
+                            batch_size=batch_size,
+                            num_samples=num_samples,
+                            models=st.session_state.models,
+                        )
                     )
-                )
 
-                for model_name, fig in figures.items():
-                    st.subheader(f"Visualization for {model_name}")
-                    st.plotly_chart(fig, use_container_width=True)
+                    # Store the parameters that generated these visualizations
+                    st.session_state.last_viz_params = current_viz_params
 
-            except Exception as e:
-                st.error(f"Error generating visualizations: {str(e)}")
+                except Exception as e:
+                    st.error(f"Error generating visualizations: {str(e)}")
+
+    # Display visualizations if they exist
+    if st.session_state.viz_figures:
+        for model_name, fig in st.session_state.viz_figures.items():
+            st.subheader(f"Visualization for {model_name}")
+            st.plotly_chart(fig, use_container_width=True)
