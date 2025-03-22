@@ -13,6 +13,8 @@ import asyncio
 from src.contrastive_learning import main as train_main
 from src.plot_embedding_map import main as plot_main
 from src.services.embedding_inference import EmbeddingSearchService
+from src.services.qdrant_indexing import main as indexing_main
+from src.services.search_rag import RAGSearchService, INTENT_DESCRIPTIONS
 
 # StreamlitHandler class for logging
 class StreamlitHandler(logging.Handler):
@@ -75,6 +77,34 @@ if "inference_service" not in st.session_state:
 if "model_loaded" not in st.session_state:
     st.session_state.model_loaded = False
 
+# Indexing tab state
+if "indexing_df" not in st.session_state:
+    st.session_state.indexing_df = None
+if "indexing_csv_path" not in st.session_state:
+    st.session_state.indexing_csv_path = "./data/dataset.csv"
+if "indexing_in_progress" not in st.session_state:
+    st.session_state.indexing_in_progress = False
+if "indexing_completed" not in st.session_state:
+    st.session_state.indexing_completed = False
+
+# RAG Classifier tab state
+if "rag_collection" not in st.session_state:
+    st.session_state.rag_collection = "ivr-classifier"
+if "rag_dense_model" not in st.session_state:
+    st.session_state.rag_dense_model = (
+        "truefoundry/setfit-mxbai-embed-xsmall-v1-ivr-classifier"
+    )
+if "rag_sparse_model" not in st.session_state:
+    st.session_state.rag_sparse_model = "Qdrant/bm25"
+if "rag_late_model" not in st.session_state:
+    st.session_state.rag_late_model = "colbert-ir/colbertv2.0"
+if "rag_service" not in st.session_state:
+    st.session_state.rag_service = None
+if "rag_model_loaded" not in st.session_state:
+    st.session_state.rag_model_loaded = False
+if "rag_intent_descriptions" not in st.session_state:
+    st.session_state.rag_intent_descriptions = INTENT_DESCRIPTIONS
+
 # Page configuration
 st.set_page_config(
     page_title="Truefoundry Classifier - Train & Visualize & Evaluate",
@@ -115,13 +145,22 @@ def on_tab_change():
     st.session_state.last_active_tab = active_tab
 
 
+st.markdown("---")
 # Use radio buttons for tab selection
 active_tab = st.radio(
     "",
-    ["Train Model", "Visualize Embeddings", "Embedding Inference"],
+    [
+        "Train Model",
+        "Visualize Embeddings",
+        "Embedding Inference",
+        "Multi-Vector Indexing",
+        "RAG Classifier",
+    ],
     horizontal=True,
     format_func=lambda x: x.upper(),
 )
+
+st.markdown("---")
 
 # Check if tab has changed
 if st.session_state.last_active_tab != active_tab:
@@ -322,6 +361,152 @@ def render_inference_sidebar():
         return model_name, load_button
 
 
+def render_indexing_sidebar():
+    with st.sidebar:
+        st.header("Indexing Configuration")
+
+        # File upload
+        uploaded_file = st.file_uploader(
+            "Upload CSV dataset", type="csv", key="indexing_upload"
+        )
+        use_default_csv = st.checkbox(
+            "Use default dataset", value=not bool(uploaded_file), key="indexing_default"
+        )
+
+        if use_default_csv:
+            input_csv = "./data/dataset.csv"
+            if not os.path.exists(input_csv):
+                st.error(f"Default dataset not found at {input_csv}")
+                st.stop()
+            st.success(f"Using default dataset: {input_csv}")
+        elif uploaded_file:
+            with NamedTemporaryFile(delete=False, suffix=".csv") as tmp_file:
+                tmp_file.write(uploaded_file.getvalue())
+                input_csv = tmp_file.name
+        else:
+            st.warning("Please upload a CSV file or use the default dataset")
+            st.stop()
+
+        # Save the CSV path to session state
+        st.session_state.indexing_csv_path = input_csv
+
+        # Collection name
+        collection_name = st.text_input(
+            "Collection Name",
+            value="classifier_collection",
+            help="Name of the Qdrant collection to create/update",
+            key="collection_name",
+        )
+
+        # Dense model selection
+        dense_model = st.text_input(
+            "Dense Embedding Model",
+            value="truefoundry/setfit-mxbai-embed-xsmall-v1-ivr-classifier",
+            help="Model for generating dense embeddings, should be present in the Infinity service",
+            key="dense_model",
+        )
+
+        # Batch size
+        batch_size = st.slider(
+            "Batch Size",
+            min_value=1,
+            max_value=4,
+            value=4,
+            help="Number of documents to process at once",
+            key="indexing_batch_size",
+        )
+
+        # Options
+        delete_existing = st.checkbox(
+            "Delete Existing Collection",
+            value=False,
+            help="Delete the existing collection before indexing",
+            key="delete_existing",
+        )
+
+        update = st.checkbox(
+            "Update Existing Collection",
+            value=False,
+            help="Update the existing collection with new data (skip existing documents)",
+            key="update_existing",
+        )
+
+        st.markdown("---")
+
+        index_button = st.button(
+            "Start Indexing",
+            disabled=st.session_state.indexing_in_progress,
+            help="Start the indexing process",
+        )
+
+        return (
+            input_csv,
+            collection_name,
+            dense_model,
+            batch_size,
+            delete_existing,
+            update,
+            index_button,
+        )
+
+
+def render_rag_sidebar():
+    with st.sidebar:
+        st.header("RAG Classifier Configuration")
+
+        # Collection name
+        collection_name = st.text_input(
+            "Collection Name",
+            value=st.session_state.rag_collection,
+            help="Name of the Qdrant collection to use",
+            key="rag_collection_name",
+        )
+
+        # Dense model selection
+        dense_model = st.text_input(
+            "Dense Embedding Model",
+            value=st.session_state.rag_dense_model,
+            help="Model for generating dense embeddings",
+            key="rag_dense_model_name",
+        )
+
+        # Load model button
+        load_button = st.button(
+            "Load Model",
+            disabled=st.session_state.rag_model_loaded
+            and collection_name == st.session_state.rag_collection
+            and dense_model == st.session_state.rag_dense_model,
+            help="Load the selected model for RAG classification",
+        )
+
+        if st.session_state.rag_model_loaded:
+            st.success(
+                f"Model loaded: Collection '{st.session_state.rag_collection}' with Dense Model '{st.session_state.rag_dense_model}'"
+            )
+
+        # Advanced settings expander
+        with st.expander("Advanced Settings"):
+            # Sparse model selection
+            sparse_model = st.text_input(
+                "Sparse Embedding Model",
+                value=st.session_state.rag_sparse_model,
+                help="Model for generating sparse embeddings",
+                key="rag_sparse_model_name",
+                disabled=True,
+            )
+
+            # Late interaction model selection
+            late_model = st.text_input(
+                "Late Interaction Model",
+                value=st.session_state.rag_late_model,
+                help="Model for late interaction embeddings",
+                key="rag_late_model_name",
+                disabled=True,
+            )
+
+        return collection_name, dense_model, sparse_model, late_model, load_button
+
+
 # Clear the sidebar before rendering the active tab's sidebar
 st.sidebar.empty()
 
@@ -518,7 +703,7 @@ elif active_tab == "Visualize Embeddings":
         for model_name, fig in st.session_state.viz_figures.items():
             st.subheader(f"Visualization for {model_name}")
             st.plotly_chart(fig, use_container_width=True)
-else:  # Inference tab
+elif active_tab == "Embedding Inference":
     # Inference Tab Content
     st.write("Perform inference using trained embedding model")
 
@@ -573,3 +758,214 @@ else:  # Inference tab
                     st.info(f"Predicted Class: {result}")
             except Exception as e:
                 st.error(f"Error during prediction: {str(e)}")
+elif active_tab == "Multi-Vector Indexing":
+    # Indexing Tab Content
+    st.write("Index documents into Qdrant for vector search")
+
+    # Get indexing parameters from sidebar
+    (
+        input_csv,
+        collection_name,
+        dense_model,
+        batch_size,
+        delete_existing,
+        update,
+        index_button,
+    ) = render_indexing_sidebar()
+
+    # Load dataset if not already loaded or if path changed
+    if (
+        st.session_state.indexing_df is None
+        or st.session_state.indexing_csv_path != input_csv
+    ):
+        try:
+            df = pd.read_csv(input_csv)
+
+            # Validate that the CSV has the required columns
+            if "text" not in df.columns or "label" not in df.columns:
+                st.error("CSV file must contain 'text' and 'label' columns")
+                st.stop()
+
+            st.session_state.indexing_df = df
+            st.session_state.indexing_csv_path = input_csv
+        except Exception as e:
+            st.error(f"Error loading dataset: {str(e)}")
+            st.stop()
+
+    # Display dataset preview
+    try:
+        df = st.session_state.indexing_df
+        st.subheader("Dataset Preview")
+        st.dataframe(df.head())
+
+        st.subheader("Dataset Statistics")
+        st.write(f"Total documents to index: {len(df)}")
+        unique_labels = df["label"].unique()
+        st.write(f"Number of unique labels: {len(unique_labels)}")
+
+        label_counts = df["label"].value_counts().reset_index()
+        label_counts.columns = ["Label", "Count"]
+        st.bar_chart(label_counts.set_index("Label"))
+    except Exception as e:
+        st.error(f"Error displaying dataset: {str(e)}")
+        st.stop()
+
+    # Indexing section
+    st.subheader("Indexing")
+
+    # Create placeholder elements for indexing progress
+    status_text = st.empty()
+    progress_container = st.empty()
+
+    # Display previous indexing results if available
+    if st.session_state.indexing_completed and not index_button:
+        status_text.success("Previous indexing completed successfully!")
+
+    # Start indexing when button is clicked
+    if index_button:
+        st.session_state.indexing_in_progress = True
+
+        try:
+            status_text.text("Starting indexing process...")
+
+            with st.spinner("Indexing documents... This might take a while."):
+                # Run the indexing process
+                asyncio.run(
+                    indexing_main(
+                        csv_path=input_csv,
+                        collection=collection_name,
+                        dense_model=dense_model,
+                        sparse_model=None,  # Not using sparse model
+                        late_interaction_model=None,  # Not using late_interaction model
+                        delete_existing=delete_existing,
+                        batch_size=batch_size,
+                        update=update,
+                    )
+                )
+
+            status_text.success("Indexing completed successfully!")
+            st.session_state.indexing_in_progress = False
+            st.session_state.indexing_completed = True
+
+        except Exception as e:
+            st.session_state.indexing_in_progress = False
+            st.error(f"Error during indexing: {str(e)}")
+elif active_tab == "RAG Classifier":
+    # RAG Classifier Tab Content
+    st.write("Perform RAG-based classification using Qdrant vector database")
+
+    # Get RAG parameters from sidebar
+    (
+        collection_name,
+        dense_model,
+        sparse_model,
+        late_model,
+        load_button,
+    ) = render_rag_sidebar()
+
+    # Load the model when button is clicked
+    if load_button:
+        with st.spinner("Loading RAG model..."):
+            try:
+                # Create async event loop to load the model
+                async def load_rag_model():
+                    st.session_state.rag_service = await RAGSearchService.get_instance(
+                        collection=collection_name,
+                        dense_model=dense_model,
+                        sparse_model=sparse_model,
+                        late_interaction_model=late_model,
+                    )
+                    st.session_state.rag_collection = collection_name
+                    st.session_state.rag_dense_model = dense_model
+                    st.session_state.rag_sparse_model = sparse_model
+                    st.session_state.rag_late_model = late_model
+                    st.session_state.rag_model_loaded = True
+
+                # Run the async function
+                asyncio.run(load_rag_model())
+                st.success(
+                    f"RAG model loaded successfully: Collection '{collection_name}'"
+                )
+            except Exception as e:
+                st.error(f"Error loading RAG model: {str(e)}")
+
+    # Set up the classification input area
+    st.subheader("Input for Classification")
+
+    # Two columns layout
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        query = st.text_area("Query text", height=150, key="rag_input")
+
+    with col2:
+        limit = st.number_input(
+            "Number of similar sentences",
+            min_value=1,
+            max_value=20,
+            value=5,
+            help="Number of similar sentences to retrieve from the vector database",
+            key="rag_limit",
+        )
+
+        use_custom_desc = st.checkbox(
+            "Use custom intent descriptions", value=False, key="use_custom_desc"
+        )
+
+    if use_custom_desc:
+        intent_descriptions = st.text_area(
+            "Custom intent descriptions",
+            value=st.session_state.rag_intent_descriptions,
+            height=200,
+            help="Custom intent descriptions to use for classification",
+            key="custom_intent_descriptions",
+        )
+        # Save to session state
+        if intent_descriptions != st.session_state.rag_intent_descriptions:
+            st.session_state.rag_intent_descriptions = intent_descriptions
+    else:
+        intent_descriptions = INTENT_DESCRIPTIONS
+
+    # Predict button
+    predict_button = st.button(
+        "Classify", disabled=not st.session_state.rag_model_loaded
+    )
+
+    # Result area
+    result_container = st.container()
+
+    # Perform classification when predict button is clicked
+    if predict_button and query:
+        with st.spinner("Classifying..."):
+            try:
+                # Create async function for classification
+                async def get_classification():
+                    if not st.session_state.rag_service:
+                        st.error("RAG model not loaded. Please load a model first.")
+                        return
+
+                    result = await st.session_state.rag_service.search(
+                        query=query,
+                        limit=limit,
+                        intent_descriptions=intent_descriptions
+                        if use_custom_desc
+                        else "",
+                    )
+                    return result
+
+                # Run classification
+                result = asyncio.run(get_classification())
+
+                # Display result
+                with result_container:
+                    st.subheader("Classification Result")
+                    st.info(f"Predicted Intent: {result['intent']}")
+
+                    st.subheader("Similar Queries")
+                    similar_queries = result["additionalData"]["similarQueries"]
+
+                    # Create a DataFrame for display
+                    similar_df = pd.DataFrame(similar_queries)
+                    st.dataframe(similar_df, use_container_width=True)
+            except Exception as e:
+                st.error(f"Error during classification: {str(e)}")
