@@ -111,9 +111,11 @@ async def create_collection(
             model_configs=model_configs,
         )
 
-        print(f"Collection {collection} created with models: {model_configs.keys()}")
+        logger.info(
+            f"Collection {collection} created with models: {model_configs.keys()}"
+        )
     except Exception as e:
-        print(f"Error creating collection {collection}: {e}")
+        logger.error(f"Error creating collection {collection}: {e}")
         raise e
 
 
@@ -146,7 +148,7 @@ async def index_documents(
         if update:
             exists = await vector_db.document_exists(collection, checksum)
             if exists:
-                print(
+                logger.info(
                     f"Skipping document with checksum {checksum} as it already exists"
                 )
                 continue
@@ -201,11 +203,11 @@ async def main(
     batch_size: int = 4,
     update: bool = False,
 ):
-    # Create a temp directory
-    temp_dir = tempfile.mkdtemp()
-    logger.info(f"Temp directory created at {temp_dir}")
     # if csv_path begins with `artifact:` load from artifact
     if csv_path.startswith("artifact:"):
+        # Create a temp directory
+        temp_dir = tempfile.mkdtemp()
+        logger.info(f"Temp directory created at {temp_dir}")
         downloaded_dir = load_csv_from_artifact(csv_path, temp_dir)
         logger.info(f"CSV loaded from artifact to {downloaded_dir}")
         # Iterater over the directory and load all csv files
@@ -224,15 +226,21 @@ async def main(
     qdrant_vector_db = await create_qdrant_client(qdrant_url=settings.QDRANT_URL)
 
     if delete_existing:
-        await qdrant_vector_db.delete_collection(collection)
-        logger.info(f"Deleting existing collection {collection} before indexing")
+        try:
+            await qdrant_vector_db.delete_collection(collection)
+            logger.info(f"Deleting existing collection {collection} before indexing")
+        except Exception as e:
+            logger.error(f"Error deleting collection {collection}: {e}")
 
     if not update:
-        # Check if collection exists, if so raise error
-        if await qdrant_vector_db.collection_exists(collection):
-            raise ValueError(
-                f"Collection {collection} already exists, delete it before indexing using --delete-existing flag or use --update flag to update the existing collection"
-            )
+        try:
+            # Check if collection exists, if so raise error
+            if await qdrant_vector_db.collection_exists(collection):
+                raise ValueError(
+                    f"Collection {collection} already exists, delete it before indexing using --delete-existing flag or use --update flag to update the existing collection"
+                )
+        except Exception as e:
+            logger.error(f"Error checking if collection {collection} exists: {e}")
 
         # Create collection
         await create_collection(
@@ -243,6 +251,7 @@ async def main(
             sparse_model=sparse_model,
             late_interaction_model=late_interaction_model,
         )
+        logger.info(f"Collection {collection} created successfully")
 
     # Iterate over dataframe in batches of 4
     dataset = pd.read_csv(csv_path)

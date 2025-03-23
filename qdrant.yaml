@@ -1,0 +1,64 @@
+name: qdrant-v13
+type: helm
+source:
+  type: helm-repo
+  chart: qdrant
+  version: 1.13.5
+  repo_url: https://qdrant.github.io/qdrant-helm
+values:
+  service:
+    type: ClusterIP
+    ports:
+      - name: http
+        port: 6333
+        protocol: TCP
+        targetPort: 6333
+        checksEnabled: true
+      - name: grpc
+        port: 6334
+        protocol: TCP
+        targetPort: 6334
+        checksEnabled: false
+      - name: http-p2p
+        port: 6335
+        protocol: TCP
+        targetPort: 6335
+        checksEnabled: false
+  resources:
+    limits:
+      cpu: 2
+      memory: 2000Mi
+    requests:
+      cpu: 1
+      memory: 1000Mi
+  persistence:
+    size: 10
+  tolerations:
+    - key: cloud.google.com/gke-spot
+      value: "true"
+      effect: NoSchedule
+      operator: Equal
+    - key: kubernetes.azure.com/scalesetpriority
+      value: spot
+      effect: NoSchedule
+      operator: Equal
+  replicaCount: 1
+  fullnameOverride: qdrant-v13
+kustomize:
+  additions:
+    - kind: VirtualService
+      spec:
+        http:
+          - route:
+              - destination:
+                  host: qdrant-v13.pratham-ws.svc.cluster.local
+                  port:
+                    number: 6333
+        hosts:
+          - qdrant-v13.tfy-usea1-ctl.devtest.truefoundry.tech
+        gateways:
+          - istio-system/tfy-wildcard
+      metadata:
+        name: qdrant-v13-vs
+      apiVersion: networking.istio.io/v1alpha3
+workspace_fqn: tfy-usea1-devtest:pratham-ws

@@ -96,7 +96,7 @@ class QdrantVectorDB:
             vector_params = {
                 "size": config["size"],
                 "distance": models.Distance.COSINE,
-                "on_disk": False,
+                "on_disk": True,
                 "datatype": models.Datatype.FLOAT16,
             }
 
@@ -132,7 +132,7 @@ class QdrantVectorDB:
                 full_scan_threshold=1000,
                 max_indexing_threads=8,
             ),
-            on_disk_payload=False,
+            on_disk_payload=True,
         )
 
         await self.client.create_payload_index(

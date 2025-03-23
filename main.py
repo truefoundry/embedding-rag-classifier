@@ -393,7 +393,7 @@ def render_indexing_sidebar():
         # Collection name
         collection_name = st.text_input(
             "Collection Name",
-            value="classifier_collection",
+            value="ivr-classifier",
             help="Name of the Qdrant collection to create/update",
             key="collection_name",
         )
@@ -835,8 +835,6 @@ elif active_tab == "Multi-Vector Indexing":
                         csv_path=input_csv,
                         collection=collection_name,
                         dense_model=dense_model,
-                        sparse_model=None,  # Not using sparse model
-                        late_interaction_model=None,  # Not using late_interaction model
                         delete_existing=delete_existing,
                         batch_size=batch_size,
                         update=update,
