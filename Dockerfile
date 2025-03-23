@@ -16,6 +16,8 @@ COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen
 
+RUN uv pip install umap-learn
+
 COPY . .
 
 EXPOSE 8000
