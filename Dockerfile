@@ -9,13 +9,15 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy the project into the image
-ADD . /app
-
 # Sync the project into a new environment, using the frozen lockfile
 WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+
 RUN uv sync --frozen
+
+COPY . .
 
 EXPOSE 8000
 
-CMD ["streamlit", "run", "main.py", "--server.port", "8000"]
+CMD ["uv", "run", "streamlit", "run", "main.py", "--server.port", "8000"]
