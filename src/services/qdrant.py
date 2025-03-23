@@ -253,7 +253,7 @@ class QdrantVectorDB:
                 break
         return late_vector
 
-    @stamina.retry(on=Exception, attempts=1)
+    @stamina.retry(on=Exception, attempts=3)
     async def search(
         self,
         collection_name: str,
@@ -268,12 +268,12 @@ class QdrantVectorDB:
             limit (int): Number of results to return.
         """
         try:
+            await self.connect()
             # Generate prefetch and late query vectors for 2x limit
             prefetch_vectors = await self.generate_prefetch_vectors(
                 embeddings_dict, limit * 2
             )
             late_vector = await self.generate_late_query_vector(embeddings_dict)
-
             results = await self.client.query_points(
                 collection_name=collection_name,
                 prefetch=prefetch_vectors,

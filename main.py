@@ -683,7 +683,19 @@ elif active_tab == "Visualize Embeddings":
         if regenerate:
             with st.spinner("Generating embeddings and visualizations..."):
                 try:
-                    st.session_state.viz_figures = asyncio.run(
+                    # Helper function to run async code
+                    def run_async(coro):
+                        try:
+                            # Try to get an existing event loop
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            # If no event loop exists, create a new one
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                        return loop.run_until_complete(coro)
+
+                    # Generate visualizations
+                    st.session_state.viz_figures = run_async(
                         plot_main(
                             dataset_path=input_csv,
                             batch_size=batch_size,
@@ -714,16 +726,27 @@ elif active_tab == "Embedding Inference":
     if load_button:
         with st.spinner("Loading model..."):
             try:
-                # Create async event loop to load the model
-                async def load_model():
-                    st.session_state.inference_service = (
-                        await EmbeddingSearchService.get_instance(model_name)
-                    )
-                    st.session_state.inference_model = model_name
-                    st.session_state.model_loaded = True
+                # Helper function to run async code
+                def run_async(coro):
+                    try:
+                        # Try to get an existing event loop
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # If no event loop exists, create a new one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(coro)
 
-                # Run the async function
-                asyncio.run(load_model())
+                # Load the model
+                inference_service = run_async(
+                    EmbeddingSearchService.get_instance(model_name)
+                )
+
+                # Update session state
+                st.session_state.inference_service = inference_service
+                st.session_state.inference_model = model_name
+                st.session_state.model_loaded = True
+
                 st.success(f"Model loaded successfully: {model_name}")
             except Exception as e:
                 st.error(f"Error loading model: {str(e)}")
@@ -740,17 +763,19 @@ elif active_tab == "Embedding Inference":
     if predict_button and query:
         with st.spinner("Predicting..."):
             try:
-                # Create async function for prediction
-                async def get_prediction():
-                    if not st.session_state.inference_service:
-                        st.error("Model not loaded. Please load a model first.")
-                        return
+                # Helper function to run async code
+                def run_async(coro):
+                    try:
+                        # Try to get an existing event loop
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # If no event loop exists, create a new one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(coro)
 
-                    result = await st.session_state.inference_service.predict(query)
-                    return result
-
-                # Run prediction
-                result = asyncio.run(get_prediction())
+                # Get prediction
+                result = run_async(st.session_state.inference_service.predict(query))
 
                 # Display result
                 with result_container:
@@ -829,8 +854,19 @@ elif active_tab == "Multi-Vector Indexing":
             status_text.text("Starting indexing process...")
 
             with st.spinner("Indexing documents... This might take a while."):
+                # Helper function to run async code
+                def run_async(coro):
+                    try:
+                        # Try to get an existing event loop
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # If no event loop exists, create a new one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(coro)
+
                 # Run the indexing process
-                asyncio.run(
+                run_async(
                     indexing_main(
                         csv_path=input_csv,
                         collection=collection_name,
@@ -865,22 +901,37 @@ elif active_tab == "RAG Classifier":
     if load_button:
         with st.spinner("Loading RAG model..."):
             try:
-                # Create async event loop to load the model
-                async def load_rag_model():
-                    st.session_state.rag_service = await RAGSearchService.get_instance(
+                # Helper function to run async code
+                def run_async(coro):
+                    try:
+                        # Try to get an existing event loop
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # If no event loop exists, create a new one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(coro)
+
+                # Load the RAG model
+                run_async(
+                    RAGSearchService.get_instance(
                         collection=collection_name,
                         dense_model=dense_model,
                         sparse_model=sparse_model,
                         late_interaction_model=late_model,
                     )
-                    st.session_state.rag_collection = collection_name
-                    st.session_state.rag_dense_model = dense_model
-                    st.session_state.rag_sparse_model = sparse_model
-                    st.session_state.rag_late_model = late_model
-                    st.session_state.rag_model_loaded = True
+                )
 
-                # Run the async function
-                asyncio.run(load_rag_model())
+                # Update session state
+                st.session_state.rag_service = (
+                    True  # Just a flag to indicate model is loaded
+                )
+                st.session_state.rag_collection = collection_name
+                st.session_state.rag_dense_model = dense_model
+                st.session_state.rag_sparse_model = sparse_model
+                st.session_state.rag_late_model = late_model
+                st.session_state.rag_model_loaded = True
+
                 st.success(
                     f"RAG model loaded successfully: Collection '{collection_name}'"
                 )
@@ -936,23 +987,37 @@ elif active_tab == "RAG Classifier":
     if predict_button and query:
         with st.spinner("Classifying..."):
             try:
-                # Create async function for classification
-                async def get_classification():
-                    if not st.session_state.rag_service:
-                        st.error("RAG model not loaded. Please load a model first.")
-                        return
+                # Helper function to run async code
+                def run_async(coro):
+                    try:
+                        # Try to get an existing event loop
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # If no event loop exists, create a new one
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(coro)
 
-                    result = await st.session_state.rag_service.search(
+                # Get a fresh instance of the service
+                rag_service = run_async(
+                    RAGSearchService.get_instance(
+                        collection=st.session_state.rag_collection,
+                        dense_model=st.session_state.rag_dense_model,
+                        sparse_model=st.session_state.rag_sparse_model,
+                        late_interaction_model=st.session_state.rag_late_model,
+                    )
+                )
+
+                # Perform the search
+                result = run_async(
+                    rag_service.search(
                         query=query,
                         limit=limit,
                         intent_descriptions=intent_descriptions
                         if use_custom_desc
                         else "",
                     )
-                    return result
-
-                # Run classification
-                result = asyncio.run(get_classification())
+                )
 
                 # Display result
                 with result_container:

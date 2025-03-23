@@ -71,8 +71,8 @@ class RAGSearchService:
         cls,
         collection: str,
         dense_model: str,
-        sparse_model: str,
-        late_interaction_model: str,
+        sparse_model: str = "Qdrant/bm25",
+        late_interaction_model: str = "colbert-ir/colbertv2.0",
     ):
         """Get the singleton instance of SearchService."""
         if cls._instance is None:
@@ -86,6 +86,18 @@ class RAGSearchService:
             cls._instance.infinity_client = cls._instance._create_infinity_client()
             cls._instance.qdrant_vector_db = await cls._instance._create_qdrant_client()
             cls._instance.llm_client = await cls._instance._create_llm_client()
+        else:
+            # Update the instance properties when called with potentially different params
+            cls._instance.collection = collection
+            cls._instance.dense_model = dense_model
+            cls._instance.sparse_model = sparse_model
+            cls._instance.late_interaction_model = late_interaction_model
+
+            # Always recreate clients to ensure fresh connections
+            cls._instance.infinity_client = cls._instance._create_infinity_client()
+            cls._instance.qdrant_vector_db = await cls._instance._create_qdrant_client()
+            cls._instance.llm_client = await cls._instance._create_llm_client()
+
         return cls._instance
 
     def _create_infinity_client(self):
@@ -96,9 +108,16 @@ class RAGSearchService:
 
     async def _create_qdrant_client(self):
         """Create a Qdrant client for indexing documents."""
-        qdrant_vector_db = QdrantVectorDB.create(url=settings.QDRANT_URL)
-        await qdrant_vector_db.connect()
-        return qdrant_vector_db
+        try:
+            qdrant_vector_db = QdrantVectorDB.create(url=settings.QDRANT_URL)
+            await qdrant_vector_db.connect()
+            return qdrant_vector_db
+        except Exception as e:
+            logger.error(f"Error creating Qdrant client: {e}")
+            # Try again with a new client
+            qdrant_vector_db = QdrantVectorDB.create(url=settings.QDRANT_URL)
+            await qdrant_vector_db.connect()
+            return qdrant_vector_db
 
     async def _create_llm_client(self):
         """Create an OpenAI client for generating embeddings."""
@@ -139,50 +158,67 @@ class RAGSearchService:
         self, query: str, limit: int = 5, intent_descriptions: str = ""
     ) -> Dict:
         """Search for the given intent."""
-        embeddings_dict = {}
+        try:
+            embeddings_dict = {}
 
-        # Get all embeddings in parallel
-        dense_embedding, sparse_embedding, late_embedding = await asyncio.gather(
-            self.infinity_client.get_embeddings(query, self.dense_model),
-            self.infinity_client.get_embeddings(query, self.sparse_model),
-            self.infinity_client.get_embeddings(query, self.late_interaction_model),
-        )
+            # Get all embeddings in parallel
+            dense_embedding, sparse_embedding, late_embedding = await asyncio.gather(
+                self.infinity_client.get_embeddings(query, self.dense_model),
+                self.infinity_client.get_embeddings(query, self.sparse_model),
+                self.infinity_client.get_embeddings(query, self.late_interaction_model),
+            )
 
-        embeddings_dict[self.dense_model] = {
-            "embedding": dense_embedding,
-            "category": EmbeddingCategory.DENSE,
-        }
+            embeddings_dict[self.dense_model] = {
+                "embedding": dense_embedding,
+                "category": EmbeddingCategory.DENSE,
+            }
 
-        embeddings_dict[self.sparse_model] = {
-            "embedding": sparse_embedding,
-            "category": EmbeddingCategory.SPARSE,
-        }
+            embeddings_dict[self.sparse_model] = {
+                "embedding": sparse_embedding,
+                "category": EmbeddingCategory.SPARSE,
+            }
 
-        embeddings_dict[self.late_interaction_model] = {
-            "embedding": late_embedding,
-            "category": EmbeddingCategory.LATE_INTERACTION,
-        }
+            embeddings_dict[self.late_interaction_model] = {
+                "embedding": late_embedding,
+                "category": EmbeddingCategory.LATE_INTERACTION,
+            }
 
-        results = await self.qdrant_vector_db.search(
-            collection_name=self.collection,
-            embeddings_dict=embeddings_dict,
-            limit=limit,
-        )
+            try:
+                results = await self.qdrant_vector_db.search(
+                    collection_name=self.collection,
+                    embeddings_dict=embeddings_dict,
+                    limit=limit,
+                )
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    # Reconnect and try again
+                    logger.warning("Event loop closed, reconnecting to Qdrant")
+                    self.qdrant_vector_db = await self._create_qdrant_client()
+                    results = await self.qdrant_vector_db.search(
+                        collection_name=self.collection,
+                        embeddings_dict=embeddings_dict,
+                        limit=limit,
+                    )
+                else:
+                    raise
 
-        top_five = [
-            {"query": result.payload["text"], "intent": result.payload["label"]}
-            for result in results
-        ]
+            top_five = [
+                {"query": result.payload["text"], "intent": result.payload["label"]}
+                for result in results
+            ]
 
-        llm_intent = await self._get_intent_from_llm(
-            query, top_five, intent_descriptions
-        )
-        output = {
-            "intent": llm_intent,
-            "additionalData": {"similarQueries": top_five},
-        }
+            llm_intent = await self._get_intent_from_llm(
+                query, top_five, intent_descriptions
+            )
+            output = {
+                "intent": llm_intent,
+                "additionalData": {"similarQueries": top_five},
+            }
 
-        return output
+            return output
+        except Exception as e:
+            logger.error(f"Error in search: {e}")
+            raise
 
 
 async def main(
